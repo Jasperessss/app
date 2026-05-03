@@ -1,1 +1,286 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <title>Управление мероприятием</title>
+    <style>
+        :root {
+            --bg-color: #0d0d0d;
+            --panel-bg: rgba(255, 255, 255, 0.03);
+            --card-bg: rgba(255, 255, 255, 0.02);
+            --border-color: rgba(255, 255, 255, 0.08);
+            --hp-color: #ff4d4d;
+            --rinehart-color: #3e79d2;
+            --young-color: #7eadf4;
+            --test-color: #ffffff;
+            --success: #28a745;
+            --text-main: #efefef;
+        }
 
+        body { 
+            background: var(--bg-color); 
+            color: var(--text-main); 
+            font-family: 'Montserrat', sans-serif; 
+            display: flex; 
+            margin: 0; 
+            min-height: 100vh;
+            padding: 30px;
+            box-sizing: border-box;
+            gap: 25px;
+            justify-content: center;
+        }
+
+        .block { 
+            flex: 1;
+            max-width: 780px;
+            background: var(--panel-bg);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid var(--border-color);
+            border-radius: 28px;
+            padding: 30px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.6);
+            display: flex;
+            flex-direction: column;
+            height: fit-content;
+        }
+
+        h2 { font-weight: 700; font-size: 24px; margin: 0 0 20px 0; letter-spacing: -0.5px; }
+        h3 { font-size: 11px; text-transform: uppercase; letter-spacing: 2px; color: #555; margin: 25px 0 10px 10px; font-weight: 700; }
+        
+        /* Стиль для цифр в заголовках */
+        .count-badge { color: #444; margin-left: 5px; font-weight: 600; }
+
+        .card { 
+            background: var(--card-bg);
+            padding: 12px 16px; 
+            margin: 8px 0; 
+            border-radius: 18px; 
+            border: 1px solid var(--border-color);
+            display: flex; 
+            justify-content: space-between; 
+            align-items: center; 
+        }
+
+        .hp { border-left: 4px solid var(--hp-color); }
+        .rinehart { border-left: 4px solid var(--rinehart-color); }
+        .young { border-left: 4px solid var(--young-color); }
+        .test { border-left: 4px solid var(--test-color); }
+
+        .ready { 
+            background: rgba(40, 167, 69, 0.1) !important; 
+            border-color: rgba(40, 167, 69, 0.4) !important; 
+        }
+
+        input, select, button { 
+            font-family: 'Montserrat', sans-serif; 
+            outline: none;
+        }
+
+        .input-group input {
+            background: rgba(255, 255, 255, 0.05); 
+            border: 1px solid var(--border-color); 
+            border-radius: 12px; 
+            padding: 10px 15px; 
+            color: white;
+            font-size: 13px;
+        }
+
+        select {
+            background: rgba(255, 255, 255, 0.08); 
+            border: 1px solid var(--border-color); 
+            border-radius: 12px; 
+            height: 34px;
+            color: #efefef;
+            cursor: pointer;
+            appearance: none;
+            background-image: url("data:image/svg+xml;charset=UTF-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 10px center;
+            padding: 0 30px 0 12px;
+            font-size: 12px;
+        }
+
+        button { 
+            border-radius: 12px; 
+            border: none; 
+            font-weight: 600; 
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        button:hover { opacity: 0.8; transform: translateY(-1px); }
+
+        .btn-add-main { background: #fff; color: #000; padding: 10px 20px; font-size: 13px; }
+        .btn-event { background: var(--success); color: #fff; padding: 0 15px; height: 34px; font-size: 12px; }
+        .btn-clear { background: transparent; color: var(--hp-color); border: 1px solid rgba(255, 77, 77, 0.4); padding: 8px 15px; font-size: 12px; }
+        
+        .btn-del { 
+            background: rgba(255, 255, 255, 0.05); 
+            color: #666; 
+            width: 34px; 
+            height: 34px;
+        }
+
+        .score-form { display: flex; align-items: center; gap: 6px; }
+        
+        .points-input {
+            width: 32px;
+            height: 32px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+            color: white;
+            text-align: center;
+            padding: 0;
+            font-weight: 600;
+            font-size: 12px;
+        }
+
+        .btn-score { 
+            width: 32px; 
+            height: 32px; 
+            padding: 0;
+            font-size: 14px;
+            background: rgba(255,255,255,0.1); 
+            color: white; 
+        }
+        
+        .btn-score-minus { background: rgba(255, 77, 77, 0.15); color: #ff4d4d; }
+
+        .score-box { 
+            background: rgba(255, 255, 255, 0.08); 
+            padding: 4px 10px; 
+            border-radius: 8px; 
+            font-size: 13px;
+            font-weight: 700;
+            margin-right: 12px;
+            min-width: 25px;
+            text-align: center;
+        }
+
+        .player-name { font-weight: 500; font-size: 15px; }
+        .actions { display: flex; gap: 8px; align-items: center; }
+
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 10px; }
+    </style>
+</head>
+<body>
+
+<!-- Логика подсчета общего кол-ва игроков -->
+{% set total_players = [] %}
+{% for group in players_grouped.values() %}
+    {% for p in group %}
+        {% set _ = total_players.append(1) %}
+    {% endfor %}
+{% endfor %}
+
+<div class="block">
+    <!-- Использован короткий дефис -->
+    <h2>Игроки <span class="count-badge">- {{ total_players|length }}</span></h2>
+    <form method="post" action="/add_player" class="input-group" style="display: flex; gap: 10px; margin-bottom: 20px;">
+        <input name="name" placeholder="Имя нового игрока" required style="flex-grow: 1;">
+        <button class="btn-add-main">Добавить</button>
+    </form>
+
+    <div id="players-list">
+        {% for rank, players in players_grouped.items() %}
+            {% if players %}
+                <!-- Использован короткий дефис -->
+                <h3>{{ rank }} <span class="count-badge">- {{ players|length }}</span></h3>
+                {% for p in players %}
+                <div class="card {{ role_class(p.rank) }}">
+                    <div style="display:flex; align-items:center;">
+                        <span class="score-box">{{ p.score }}</span>
+                        <span class="player-name">{{ p.name }}</span>
+                    </div>
+                    <div class="actions">
+                        <form method="post" action="/score" class="score-form">
+                            <input type="hidden" name="name" value="{{p.name}}">
+                            <input name="points" class="points-input" placeholder="0">
+                            <button name="mode" value="add" class="btn-score">+</button>
+                            <button name="mode" value="remove" class="btn-score btn-score-minus">-</button>
+                        </form>
+                        
+                        <form method="post" action="/set_rank">
+                            <input type="hidden" name="name" value="{{p.name}}">
+                            <select name="rank" onchange="this.form.submit()">
+                                <option value="High Priority" {% if p.rank=='High Priority' %}selected{% endif %}>HP</option>
+                                <option value="Rinehart" {% if p.rank=='Rinehart' %}selected{% endif %}>Rinehart</option>
+                                <option value="Young" {% if p.rank=='Young' %}selected{% endif %}>Young</option>
+                                <option value="Test" {% if p.rank=='Test' %}selected{% endif %}>Test</option>
+                            </select>
+                        </form>
+
+                        <form method="post" action="/add_to_active">
+                            <input type="hidden" name="name" value="{{p.name}}">
+                            <button class="btn-event">Добавить</button>
+                        </form>
+
+                        <form method="post" action="/delete_player">
+                            <input type="hidden" name="name" value="{{p.name}}">
+                            <button class="btn-del">🗑</button>
+                        </form>
+                    </div>
+                </div>
+                {% endfor %}
+            {% endif %}
+        {% endfor %}
+    </div>
+</div>
+
+<div class="block">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 20px;">
+        <!-- Использован короткий дефис -->
+        <h2 style="margin:0;">Мероприятие <span class="count-badge">- {{ active|length }}</span></h2>
+        <a href="/clear" style="text-decoration: none;"><button class="btn-clear">Очистить</button></a>
+    </div>
+
+    <div id="active-list">
+        {% for p in active %}
+        <div class="card {{ role_class(p.rank) }} {% if p.present %}ready{% endif %}">
+            <div>
+                <div class="player-name">#{{ loop.index }} {{ p.name }}</div>
+                <div style="font-size: 10px; color: #555; margin-top: 2px;">{{ p.rank }} • {{ p.score }} PTS</div>
+            </div>
+            <div class="actions">
+                <form method="post" action="/toggle">
+                    <input type="hidden" name="name" value="{{p.name}}">
+                    <button style="background: {% if p.present %}rgba(255,255,255,0.05){% else %}#fff{% endif %}; 
+                                   color: {% if p.present %}#fff{% else %}#000{% endif %}; 
+                                   border: {% if p.present %}1px solid rgba(255,255,255,0.1){% else %}none{% endif %};
+                                   padding: 8px 15px; font-size: 12px;">
+                        {% if p.present %}Занят{% else %}Готов{% endif %}
+                    </button>
+                </form>
+                <form method="post" action="/remove_active">
+                    <input type="hidden" name="name" value="{{p.name}}">
+                    <button class="btn-del">✕</button>
+                </form>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+
+<script>
+    window.addEventListener("scroll", function() {
+        localStorage.setItem("windowScrollPos", window.scrollY);
+    });
+
+    document.addEventListener("DOMContentLoaded", function() {
+        const scrollPos = localStorage.getItem("windowScrollPos");
+        if (scrollPos) {
+            window.scrollTo(0, scrollPos);
+        }
+    });
+</script>
+
+</body>
+</html>
