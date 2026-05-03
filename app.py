@@ -1,11 +1,13 @@
-from flask import Flask, render_template, request, redirect
+import os
 import sqlite3
-import webbrowser
-import threading
+from flask import Flask, render_template, request, redirect
 
 app = Flask(__name__)
 app.secret_key = "event_system_key"
-DB = "players.db"
+
+# Правильный путь к базе данных для Render
+basedir = os.path.abspath(os.path.dirname(__file__))
+DB = os.path.join(basedir, 'players.db')
 
 RANK_WEIGHT = {"High Priority": 4, "Rinehart": 3, "Young": 2, "Test": 1}
 
@@ -14,22 +16,34 @@ def get_db():
     conn.row_factory = sqlite3.Row
     return conn
 
+# Инициализация базы данных (создание таблиц)
+def init_db():
+    conn = get_db()
+    conn.execute("CREATE TABLE IF NOT EXISTS players (name TEXT PRIMARY KEY, score INTEGER DEFAULT 0, rank TEXT DEFAULT 'Test')")
+    conn.execute("CREATE TABLE IF NOT EXISTS active (name TEXT PRIMARY KEY, present INTEGER DEFAULT 0)")
+    conn.commit()
+    conn.close()
+
 def sort_logic(player):
     return (RANK_WEIGHT.get(player["rank"], 0), player["score"])
 
 @app.route("/")
 def index():
     conn = get_db()
-    players_raw = conn.execute("SELECT * FROM players").fetchall()
-    # Используем JOIN, чтобы данные в Event всегда соответствовали таблице Players
-    active_raw = conn.execute("""
-        SELECT p.*, a.present 
-        FROM active a 
-        JOIN players p ON a.name = p.name
-    """).fetchall()
-    conn.close()
+    try:
+        players_raw = conn.execute("SELECT * FROM players").fetchall()
+        active_raw = conn.execute("""
+            SELECT p.*, a.present 
+            FROM active a 
+            JOIN players p ON a.name = p.name
+        """).fetchall()
+    except sqlite3.OperationalError:
+        # Если таблиц нет, создаем их и берем пустой список
+        init_db()
+        players_raw, active_raw = [], []
+    finally:
+        conn.close()
 
-    # Сортировка и группировка
     sorted_players = sorted(players_raw, key=sort_logic, reverse=True)
     groups = {rank: [] for rank in RANK_WEIGHT.keys()}
     for p in sorted_players:
@@ -131,14 +145,9 @@ def clear():
     conn.close()
     return redirect("/")
 
-def open_browser():
-    webbrowser.open("http://127.0.0.1:5000")
+# Инициализируем базу данных при запуске приложения
+init_db()
 
 if __name__ == "__main__":
-    conn = get_db()
-    conn.execute("CREATE TABLE IF NOT EXISTS players (name TEXT PRIMARY KEY, score INTEGER DEFAULT 0, rank TEXT DEFAULT 'Test')")
-    conn.execute("CREATE TABLE IF NOT EXISTS active (name TEXT PRIMARY KEY, present INTEGER DEFAULT 0)")
-    conn.commit()
-    conn.close()
-    threading.Timer(1.5, open_browser).start()
-    app.run(debug=False)
+    # Локальный запуск (для твоего ПК)
+    app.run(debug=True)
