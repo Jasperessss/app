@@ -1,182 +1,126 @@
 import os
 import psycopg2
-from psycopg2.extras import RealDictCursor
-from flask import Flask, render_template, request, redirect
+from flask import Flask, render_template, request, redirect, url_for
 
 app = Flask(__name__)
-app.secret_key = "event_system_key"
 
-# Ссылка на базу данных из переменных окружения Render
-DATABASE_URL = os.environ.get('DATABASE_URL')
+# Функция для подключения к базе данных (используем DATABASE_URL из настроек Render)
+def get_db_connection():
+    conn = psycopg2.connect(os.environ.get('DATABASE_URL'))
+    return conn
 
-def get_db():
-    return psycopg2.connect(DATABASE_URL, sslmode='require')
+# Инициализация базы данных (создание таблиц, если их нет)
+def init_db():
+    conn = get_db_connection()
+    cur = conn.cursor()
+    # Таблица всех игроков
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS players (
+            id SERIAL PRIMARY KEY,
+            name TEXT UNIQUE NOT NULL,
+            score INTEGER DEFAULT 0
+        )
+    ''')
+    # Таблица активных участников мероприятия
+    # Поле name должно быть UNIQUE для работы ON CONFLICT
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS active (
+            id SERIAL PRIMARY KEY,
+            name TEXT UNIQUE NOT NULL,
+            present BOOLEAN DEFAULT FALSE
+        )
+    ''')
+    conn.commit()
+    cur.close()
+    conn.close()
 
-# Веса рангов для правильной сортировки
-RANK_WEIGHT = {"High Priority": 4, "Rinehart": 3, "Young": 2, "Test": 1}
+# Запускаем инициализацию при старте приложения
+init_db()
 
-def sort_logic(player):
-    # Если баллов нет (NULL), считаем как 0
-    score = player.get("score") if player.get("score") is not None else 0
-    rank = player.get("rank", "Test")
-    return (RANK_WEIGHT.get(rank, 0), score)
-
-@app.route("/")
+@app.route('/')
 def index():
-    conn = get_db()
-    try:
-        cur = conn.cursor(cursor_factory=RealDictCursor)
-        cur.execute("SELECT * FROM players")
-        players_raw = cur.fetchall()
-        
-        cur.execute("""
-            SELECT p.*, a.present 
-            FROM active a 
-            JOIN players p ON a.name = p.name
-        """)
-        active_raw = cur.fetchall()
-        cur.close()
-    finally:
-        conn.close()
+    conn = get_db_connection()
+    cur = conn.cursor()
+    
+    # Получаем список всех игроков для выпадающего списка
+    cur.execute("SELECT name FROM players ORDER BY name ASC")
+    all_players = [row[0] for row in cur.fetchall()]
+    
+    # Получаем список участников текущего мероприятия
+    cur.execute("SELECT name, present FROM active ORDER BY id DESC")
+    active_players = cur.fetchall()
+    
+    # Получаем топ игроков по очкам
+    cur.execute("SELECT name, score FROM players ORDER BY score DESC LIMIT 10")
+    leaderboard = cur.fetchall()
+    
+    cur.close()
+    conn.close()
+    return render_template('index.html', 
+                           all_players=all_players, 
+                           active_players=active_players, 
+                           leaderboard=leaderboard)
 
-    # Группировка игроков
-    groups = {rank: [] for rank in RANK_WEIGHT.keys()}
-    for p in sorted(players_raw, key=sort_logic, reverse=True):
-        rank = p.get("rank")
-        if rank in groups:
-            groups[rank].append(p)
-        else:
-            groups["Test"].append(p)
-
-    active_sorted = sorted(active_raw, key=sort_logic, reverse=True)
-
-    return render_template(
-        "index.html",
-        players_grouped=groups,
-        active=active_sorted,
-        role_class=lambda r: {"High Priority": "hp", "Rinehart": "rinehart", "Young": "young", "Test": "test"}.get(r, "test")
-    )
-
-@app.route("/add_player", methods=["POST"])
+@app.route('/add_player', methods=['POST'])
 def add_player():
-    name = request.form.get("name", "").strip()
+    name = request.form.get('name')
     if name:
-        conn = get_db()
-        try:
-            cur = conn.cursor()
-            cur.execute("INSERT INTO players (name, score, rank) VALUES (%s, 0, 'Test') ON CONFLICT (name) DO NOTHING", (name,))
-            conn.commit()
-            cur.close()
-        finally:
-            conn.close()
-    return redirect("/")
-
-@app.route("/score", methods=["POST"])
-def score():
-    name = request.form.get("name")
-    mode = request.form.get("mode")
-    try:
-        points = int(request.form.get("points", 0))
-    except (ValueError, TypeError):
-        points = 0
-
-    if points > 0 and name:
-        conn = get_db()
-        try:
-            cur = conn.cursor()
-            op = "+" if mode == "add" else "-"
-            cur.execute(f"UPDATE players SET score = score {op} %s WHERE name = %s", (points, name))
-            conn.commit()
-            cur.close()
-        finally:
-            conn.close()
-    return redirect("/")
-
-@app.route("/set_rank", methods=["POST"])
-def set_rank():
-    name = request.form.get("name")
-    rank = request.form.get("rank")
-    if name and rank:
-        conn = get_db()
-        try:
-            cur = conn.cursor()
-            cur.execute("UPDATE players SET rank = %s WHERE name = %s", (rank, name))
-            conn.commit()
-            cur.close()
-        finally:
-            conn.close()
-    return redirect("/")
-
-@app.route("/add_to_active", methods=["POST"])
-def add_to_active():
-    name = request.form.get("name")
-    if name:
-        conn = get_db()
-        try:
-            cur = conn.cursor()
-            # ИСПОЛЬЗУЕМ True ВМЕСТО 1 ДЛЯ ТИПА BOOLEAN
-            cur.execute("INSERT INTO active (name, present) VALUES (%s, True) ON CONFLICT (name) DO NOTHING", (name,))
-            conn.commit()
-            cur.close()
-        finally:
-            conn.close()
-    return redirect("/")
-
-@app.route("/toggle", methods=["POST"])
-def toggle():
-    name = request.form.get("name")
-    if name:
-        conn = get_db()
-        try:
-            cur = conn.cursor()
-            # Переключение True <-> False
-            cur.execute("UPDATE active SET present = NOT present WHERE name = %s", (name,))
-            conn.commit()
-            cur.close()
-        finally:
-            conn.close()
-    return redirect("/")
-
-@app.route("/remove_active", methods=["POST"])
-def remove_active():
-    name = request.form.get("name")
-    if name:
-        conn = get_db()
-        try:
-            cur = conn.cursor()
-            cur.execute("DELETE FROM active WHERE name = %s", (name,))
-            conn.commit()
-            cur.close()
-        finally:
-            conn.close()
-    return redirect("/")
-
-@app.route("/delete_player", methods=["POST"])
-def delete_player():
-    name = request.form.get("name")
-    if name:
-        conn = get_db()
-        try:
-            cur = conn.cursor()
-            cur.execute("DELETE FROM active WHERE name = %s", (name,))
-            cur.execute("DELETE FROM players WHERE name = %s", (name,))
-            conn.commit()
-            cur.close()
-        finally:
-            conn.close()
-    return redirect("/")
-
-@app.route("/clear")
-def clear():
-    conn = get_db()
-    try:
+        conn = get_db_connection()
         cur = conn.cursor()
-        cur.execute("DELETE FROM active")
+        cur.execute("INSERT INTO players (name) VALUES (%s) ON CONFLICT (name) DO NOTHING", (name,))
         conn.commit()
         cur.close()
-    finally:
         conn.close()
-    return redirect("/")
+    return redirect(url_for('index'))
 
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+@app.route('/add_to_active', methods=['POST'])
+def add_to_active():
+    name = request.form.get('name')
+    if name:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        # Статус False гарантирует, что человек добавится БЕЗ галочки "готов"
+        cur.execute("INSERT INTO active (name, present) VALUES (%s, False) ON CONFLICT (name) DO NOTHING", (name,))
+        conn.commit()
+        cur.close()
+        conn.close()
+    return redirect(url_for('index'))
+
+@app.route('/toggle', methods=['POST'])
+def toggle_present():
+    name = request.form.get('name')
+    conn = get_db_connection()
+    cur = conn.cursor()
+    # Инвертируем статус (готов/не готов)
+    cur.execute("UPDATE active SET present = NOT present WHERE name = %s", (name,))
+    conn.commit()
+    cur.close()
+    conn.close()
+    return redirect(url_for('index'))
+
+@app.route('/score', methods=['POST'])
+def update_score():
+    name = request.form.get('name')
+    change = int(request.form.get('change', 0))
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("UPDATE players SET score = score + %s WHERE name = %s", (change, name))
+    conn.commit()
+    cur.close()
+    conn.close()
+    return redirect(url_for('index'))
+
+@app.route('/clear_active', methods=['POST'])
+def clear_active():
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM active")
+    conn.commit()
+    cur.close()
+    conn.close()
+    return redirect(url_for('index'))
+
+if __name__ == '__main__':
+    # Порт берем из переменной окружения Render
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host='0.0.0.0', port=port)
