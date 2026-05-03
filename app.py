@@ -1,87 +1,144 @@
-import os
-from flask import Flask, render_template, request, redirect, url_for, jsonify
-from flask_sqlalchemy import SQLAlchemy
+from flask import Flask, render_template, request, redirect
+import sqlite3
+import webbrowser
+import threading
 
 app = Flask(__name__)
+app.secret_key = "event_system_key"
+DB = "players.db"
 
-# Настройка базы данных
-# Файл database.db будет создан автоматически в корне папки
-basedir = os.path.abspath(os.path.dirname(__file__))
-app.config['SQLALCHEMY_DATABASE_PATH'] = os.path.join(basedir, 'database.db')
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + app.config['SQLALCHEMY_DATABASE_PATH']
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+RANK_WEIGHT = {"High Priority": 4, "Rinehart": 3, "Young": 2, "Test": 1}
 
-db = SQLAlchemy(app)
+def get_db():
+    conn = sqlite3.connect(DB)
+    conn.row_factory = sqlite3.Row
+    return conn
 
-# --- МОДЕЛИ ДАННЫХ ---
+def sort_logic(player):
+    return (RANK_WEIGHT.get(player["rank"], 0), player["score"])
 
-class Player(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(100), nullable=False)
-    rank = db.Column(db.String(50), nullable=False)
-    score = db.Column(db.Integer, default=0)
-
-class ActivePlayer(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(100), nullable=False)
-    present = db.Column(db.Boolean, default=True)
-    score = db.Column(db.Integer, default=0)
-
-# --- АВТОМАТИЧЕСКОЕ СОЗДАНИЕ ТАБЛИЦ ---
-# Этот блок решает проблему "Internal Server Error" при первом запуске
-with app.app_context():
-    db.create_all()
-
-# --- МАРШРУТЫ (ROUTES) ---
-
-@app.route('/')
+@app.route("/")
 def index():
-    try:
-        players = Player.query.all()
-        active = ActivePlayer.query.all()
-        
-        ranks = ['High Priority', 'Rinehart', 'Young', 'Test']
-        # Группируем игроков по рангам для отображения
-        players_grouped = {rank: [p for p in players if p.rank == rank] for rank in ranks}
-        
-        return render_template('index.html', 
-                               players_grouped=players_grouped, 
-                               active=active,
-                               role_class=lambda r: str(r).lower().replace(' ', '-'))
-    except Exception as e:
-        return f"Ошибка базы данных: {e}. Попробуйте обновить страницу."
+    conn = get_db()
+    players_raw = conn.execute("SELECT * FROM players").fetchall()
+    # Используем JOIN, чтобы данные в Event всегда соответствовали таблице Players
+    active_raw = conn.execute("""
+        SELECT p.*, a.present 
+        FROM active a 
+        JOIN players p ON a.name = p.name
+    """).fetchall()
+    conn.close()
 
-@app.route('/add_player', methods=['POST'])
+    # Сортировка и группировка
+    sorted_players = sorted(players_raw, key=sort_logic, reverse=True)
+    groups = {rank: [] for rank in RANK_WEIGHT.keys()}
+    for p in sorted_players:
+        rank = p["rank"] if p["rank"] in groups else "Test"
+        groups[rank].append(p)
+
+    active_sorted = sorted(active_raw, key=sort_logic, reverse=True)
+
+    return render_template(
+        "index.html",
+        players_grouped=groups,
+        active=active_sorted,
+        role_class=lambda r: {"High Priority": "hp", "Rinehart": "rinehart", "Young": "young", "Test": "test"}.get(r, "test")
+    )
+
+@app.route("/add_player", methods=["POST"])
 def add_player():
-    name = request.form.get('name')
-    rank = request.form.get('rank')
-    if name and rank:
-        new_player = Player(name=name, rank=rank)
-        db.session.add(new_player)
-        db.session.commit()
-    return redirect(url_for('index'))
+    name = request.form.get("name", "").strip()
+    if name:
+        conn = get_db()
+        try:
+            conn.execute("INSERT INTO players (name, score, rank) VALUES (?, 0, 'Test')", (name,))
+            conn.commit()
+        except: pass
+        finally: conn.close()
+    return redirect("/")
 
-@app.route('/toggle_active', methods=['POST'])
-def toggle_active():
-    name = request.form.get('name')
-    # Проверяем, есть ли уже такой игрок в активных
-    existing = ActivePlayer.query.filter_by(name=name).first()
-    if existing:
-        db.session.delete(existing)
-    else:
-        new_active = ActivePlayer(name=name)
-        db.session.add(new_active)
-    db.session.commit()
-    return redirect(url_for('index'))
+@app.route("/score", methods=["POST"])
+def score():
+    name = request.form.get("name")
+    mode = request.form.get("mode")
+    try:
+        points = int(request.form.get("points", 0))
+    except ValueError:
+        points = 0
 
-@app.route('/api/get_data')
-def get_data():
-    players = Player.query.all()
-    active = ActivePlayer.query.all()
-    return jsonify({
-        "players": [{"name": p.name, "score": p.score} for p in players],
-        "active": [{"name": a.name, "score": a.score} for a in active]
-    })
+    if points > 0:
+        conn = get_db()
+        op = "+" if mode == "add" else "-"
+        conn.execute(f"UPDATE players SET score = score {op} ? WHERE name = ?", (points, name))
+        conn.commit()
+        conn.close()
+    return redirect("/")
 
-if __name__ == '__main__':
-    app.run(debug=True)
+@app.route("/set_rank", methods=["POST"])
+def set_rank():
+    name = request.form.get("name")
+    rank = request.form.get("rank")
+    conn = get_db()
+    conn.execute("UPDATE players SET rank = ? WHERE name = ?", (rank, name))
+    conn.commit()
+    conn.close()
+    return redirect("/")
+
+@app.route("/add_to_active", methods=["POST"])
+def add_to_active():
+    name = request.form.get("name")
+    conn = get_db()
+    try:
+        conn.execute("INSERT INTO active (name, present) VALUES (?, 0)", (name,))
+        conn.commit()
+    except: pass
+    finally: conn.close()
+    return redirect("/")
+
+@app.route("/remove_active", methods=["POST"])
+def remove_active():
+    name = request.form.get("name")
+    conn = get_db()
+    conn.execute("DELETE FROM active WHERE name = ?", (name,))
+    conn.commit()
+    conn.close()
+    return redirect("/")
+
+@app.route("/delete_player", methods=["POST"])
+def delete_player():
+    name = request.form.get("name")
+    conn = get_db()
+    conn.execute("DELETE FROM players WHERE name = ?", (name,))
+    conn.execute("DELETE FROM active WHERE name = ?", (name,))
+    conn.commit()
+    conn.close()
+    return redirect("/")
+
+@app.route("/toggle", methods=["POST"])
+def toggle():
+    name = request.form.get("name")
+    conn = get_db()
+    conn.execute("UPDATE active SET present = NOT present WHERE name = ?", (name,))
+    conn.commit()
+    conn.close()
+    return redirect("/")
+
+@app.route("/clear")
+def clear():
+    conn = get_db()
+    conn.execute("DELETE FROM active")
+    conn.commit()
+    conn.close()
+    return redirect("/")
+
+def open_browser():
+    webbrowser.open("http://127.0.0.1:5000")
+
+if __name__ == "__main__":
+    conn = get_db()
+    conn.execute("CREATE TABLE IF NOT EXISTS players (name TEXT PRIMARY KEY, score INTEGER DEFAULT 0, rank TEXT DEFAULT 'Test')")
+    conn.execute("CREATE TABLE IF NOT EXISTS active (name TEXT PRIMARY KEY, present INTEGER DEFAULT 0)")
+    conn.commit()
+    conn.close()
+    threading.Timer(1.5, open_browser).start()
+    app.run(debug=False)
