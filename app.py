@@ -4,9 +4,11 @@ from flask import Flask, render_template, request, redirect, url_for
 
 app = Flask(__name__)
 
+# Подключение к базе данных
 def get_db_connection():
     return psycopg2.connect(os.environ.get('DATABASE_URL'))
 
+# Инициализация структуры базы (добавление колонки rank, если её нет)
 def init_db():
     conn = get_db_connection()
     cur = conn.cursor()
@@ -35,15 +37,37 @@ init_db()
 def index():
     conn = get_db_connection()
     cur = conn.cursor()
-    cur.execute("SELECT name, score, rank FROM players ORDER BY name ASC")
-    all_players = cur.fetchall()
+    
+    # 1. Получаем всех игроков
+    cur.execute("SELECT name, score, rank FROM players ORDER BY rank, name ASC")
+    rows = cur.fetchall()
+    
+    # 2. Группировка для HTML-шаблона (исправляет ошибку UndefinedError)
+    players_grouped = {}
+    for name, score, rank in rows:
+        if rank not in players_grouped:
+            players_grouped[rank] = []
+        players_grouped[rank].append({'name': name, 'score': score, 'rank': rank})
+    
+    # 3. Список активных участников мероприятия
     cur.execute("SELECT name, present FROM active ORDER BY id DESC")
     active_players = cur.fetchall()
+    
+    # 4. Топ-10 лидеров
     cur.execute("SELECT name, score, rank FROM players ORDER BY score DESC LIMIT 10")
     leaderboard = cur.fetchall()
+    
+    # Список имен для выпадающего меню
+    all_players_names = [row[0] for row in rows]
+    
     cur.close()
     conn.close()
-    return render_template('index.html', all_players=all_players, active_players=active_players, leaderboard=leaderboard)
+    
+    return render_template('index.html', 
+                           players_grouped=players_grouped, 
+                           all_players=all_players_names, 
+                           active_players=active_players, 
+                           leaderboard=leaderboard)
 
 @app.route('/add_player', methods=['POST'])
 def add_player():
@@ -57,39 +81,17 @@ def add_player():
         conn.close()
     return redirect(url_for('index'))
 
-@app.route('/delete_player', methods=['POST'])
-def delete_player():
-    name = request.form.get('name')
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute("DELETE FROM players WHERE name = %s", (name,))
-    cur.execute("DELETE FROM active WHERE name = %s", (name,))
-    conn.commit()
-    cur.close()
-    conn.close()
-    return redirect(url_for('index'))
-
 @app.route('/add_to_active', methods=['POST'])
 def add_to_active():
     name = request.form.get('name')
     if name:
         conn = get_db_connection()
         cur = conn.cursor()
+        # СТАВИМ False: теперь человек добавляется без галочки
         cur.execute("INSERT INTO active (name, present) VALUES (%s, False) ON CONFLICT (name) DO NOTHING", (name,))
         conn.commit()
         cur.close()
         conn.close()
-    return redirect(url_for('index'))
-
-@app.route('/remove_active', methods=['POST'])
-def remove_active():
-    name = request.form.get('name')
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute("DELETE FROM active WHERE name = %s", (name,))
-    conn.commit()
-    cur.close()
-    conn.close()
     return redirect(url_for('index'))
 
 @app.route('/toggle', methods=['POST'])
@@ -122,6 +124,17 @@ def set_rank():
     conn = get_db_connection()
     cur = conn.cursor()
     cur.execute("UPDATE players SET rank = %s WHERE name = %s", (rank, name))
+    conn.commit()
+    cur.close()
+    conn.close()
+    return redirect(url_for('index'))
+
+@app.route('/remove_active', methods=['POST'])
+def remove_active():
+    name = request.form.get('name')
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM active WHERE name = %s", (name,))
     conn.commit()
     cur.close()
     conn.close()
