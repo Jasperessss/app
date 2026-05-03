@@ -6,17 +6,17 @@ from flask import Flask, render_template, request, redirect
 app = Flask(__name__)
 app.secret_key = "event_system_key"
 
-# Ссылка на базу данных из настроек Render
+# Ссылка на базу данных из переменных окружения Render
 DATABASE_URL = os.environ.get('DATABASE_URL')
 
 def get_db():
     return psycopg2.connect(DATABASE_URL, sslmode='require')
 
-# Настройка весов для сортировки по рангам
+# Веса рангов для правильной сортировки
 RANK_WEIGHT = {"High Priority": 4, "Rinehart": 3, "Young": 2, "Test": 1}
 
 def sort_logic(player):
-    # Защита от пустых значений (NULL) в базе данных
+    # Если баллов нет (NULL), считаем как 0
     score = player.get("score") if player.get("score") is not None else 0
     rank = player.get("rank", "Test")
     return (RANK_WEIGHT.get(rank, 0), score)
@@ -26,11 +26,9 @@ def index():
     conn = get_db()
     try:
         cur = conn.cursor(cursor_factory=RealDictCursor)
-        # Получаем всех игроков
         cur.execute("SELECT * FROM players")
         players_raw = cur.fetchall()
         
-        # Получаем активных участников мероприятия через JOIN
         cur.execute("""
             SELECT p.*, a.present 
             FROM active a 
@@ -41,7 +39,7 @@ def index():
     finally:
         conn.close()
 
-    # Группировка игроков по рангам для отображения в таблице
+    # Группировка игроков
     groups = {rank: [] for rank in RANK_WEIGHT.keys()}
     for p in sorted(players_raw, key=sort_logic, reverse=True):
         rank = p.get("rank")
@@ -66,7 +64,7 @@ def add_player():
         conn = get_db()
         try:
             cur = conn.cursor()
-            cur.execute("INSERT INTO players (name, score, rank) VALUES (%s, 0, 'Test') ON CONFLICT DO NOTHING", (name,))
+            cur.execute("INSERT INTO players (name, score, rank) VALUES (%s, 0, 'Test') ON CONFLICT (name) DO NOTHING", (name,))
             conn.commit()
             cur.close()
         finally:
@@ -116,7 +114,23 @@ def add_to_active():
         conn = get_db()
         try:
             cur = conn.cursor()
-            cur.execute("INSERT INTO active (name, present) VALUES (%s, 1) ON CONFLICT (name) DO NOTHING", (name,))
+            # ИСПОЛЬЗУЕМ True ВМЕСТО 1 ДЛЯ ТИПА BOOLEAN
+            cur.execute("INSERT INTO active (name, present) VALUES (%s, True) ON CONFLICT (name) DO NOTHING", (name,))
+            conn.commit()
+            cur.close()
+        finally:
+            conn.close()
+    return redirect("/")
+
+@app.route("/toggle", methods=["POST"])
+def toggle():
+    name = request.form.get("name")
+    if name:
+        conn = get_db()
+        try:
+            cur = conn.cursor()
+            # Переключение True <-> False
+            cur.execute("UPDATE active SET present = NOT present WHERE name = %s", (name,))
             conn.commit()
             cur.close()
         finally:
